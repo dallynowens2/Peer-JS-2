@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Peer from "peerjs";
 
 const randId = () => {
@@ -24,6 +24,42 @@ function App() {
   const [connections, setConnections] = useState([]);
   const [messages, setMessages] = useState([]);
 
+  const configureConnection = useCallback(
+    (conn) => {
+      conn.on("open", () => {
+        setConnections((prev) => [...prev, conn]);
+        conn.on("data", (data) => {
+          console.log(data);
+          if (data.tempLamportClock > lamportClock) {
+            setLamportClock(data.tempLamportClock + 1);
+          } else {
+            setLamportClock(lamportClock + 1);
+          }
+
+          if (data.isBroadcasted) {
+            //check if data.message is already in broadcastMessages
+            if (
+              broadcastMessages.filter((msg) => msg.message === data.message)
+                .length !== 0
+            ) {
+            } else {
+              console.log("connections ", connections);
+              setBroadcastMessages((prev) => [...prev, data]);
+              //setMessages((prev) => [...prev, data]);
+              sendMessage(data);
+            }
+            console.log("got to after send messages");
+          }
+          console.log("here set messages");
+          setMessages((prev) => [...prev, data]);
+        });
+
+        //setConnections((prev) => [...prev, conn]);
+      });
+    },
+    [broadcastMessages, connections, lamportClock, sendMessage]
+  );
+
   useEffect(() => {
     peer.on("open", (id) => {
       console.log("My id: " + id);
@@ -32,7 +68,7 @@ function App() {
       configureConnection(conn);
       console.log("Connected to peer: " + conn.peer);
     });
-  }, [peer]);
+  }, [peer, configureConnection]);
 
   const addPeer = () => {
     const conn = peer.connect(peerId);
@@ -42,33 +78,6 @@ function App() {
     setPeerId("");
   };
 
-  const configureConnection = (conn) => {
-    conn.on("open", () => {
-      conn.on("data", (data) => {
-        console.log(data);
-        if (data.tempLamportClock > lamportClock) {
-          setLamportClock(data.tempLamportClock + 1);
-        } else {
-          setLamportClock(lamportClock + 1);
-        }
-
-        if (data.isBroadcasted) {
-          //check if data.message is already in broadcastMessages
-          if (broadcastMessages.filter((msg) => msg.message === data.message).length === 0) {
-            console.log("broadcast message: ", data);
-            setBroadcastMessages([...broadcastMessages, data.message]);
-            setMessages((prev) => [...prev, data]);
-            sendMessage(data);
-          }
-        }
-
-        setMessages((prev) => [...prev, data]);
-      });
-
-      setConnections((prev) => [...prev, conn]);
-    });
-  };
-
   const sendMessageHandler = () => {
     const messageObj = {
       message,
@@ -76,7 +85,7 @@ function App() {
       author: peer.id,
       sentBy: peer.id,
       tempLamportClock: lamportClock + 1,
-      isBroadcasted: isBroadcast
+      isBroadcasted: isBroadcast,
     };
     sendMessage(messageObj);
     setMessages((prev) => [...prev, messageObj]);
@@ -85,8 +94,8 @@ function App() {
 
   const sendMessage = (m) => {
     // console.log(m);
-    if(isBroadcast) {
-      setBroadcastMessages([...broadcastMessages, m.message]);
+    if (isBroadcast) {
+      setBroadcastMessages((prev) => [...prev, m]);
     }
     setLamportClock(lamportClock + 1);
 
@@ -94,9 +103,10 @@ function App() {
       const rec = recepients.split(",");
       rec.forEach((r) => connections[r - 1].send(m));
     } else {
-      console.log("broadcast message in send: ", m);
-      console.log("broadcastMessages: ", broadcastMessages);
-      connections.forEach((c) => c.send(m));
+      connections.forEach((c) => {
+        console.log("id" + c);
+        c.send(m);
+      });
     }
   };
 
@@ -126,7 +136,6 @@ function App() {
   };
   const onCheckHandler = () => {
     setIsBroadcast(!isBroadcast);
-    console.log(isBroadcast);
   };
 
   return (
@@ -162,7 +171,7 @@ function App() {
         </button>
         <br />
         <label>Broadcast Message</label>
-        <input type="checkbox" onClick={onCheckHandler}/>
+        <input type="checkbox" onClick={onCheckHandler} />
       </div>
       <div>
         <h4>Connections</h4>
