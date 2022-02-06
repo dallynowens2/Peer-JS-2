@@ -44,6 +44,8 @@ function App() {
 
   const configureConnection = (conn) => {
     conn.on("open", () => {
+      setConnections((prev) => [...prev, conn]);
+
       conn.on("data", (data) => {
         console.log(data);
         if (data.tempLamportClock > lamportClock) {
@@ -52,20 +54,23 @@ function App() {
           setLamportClock(lamportClock + 1);
         }
 
+        setMessages((prev) => [...prev, data]);
+
         if (data.isBroadcasted) {
-          //check if data.message is already in broadcastMessages
-          if (broadcastMessages.filter((msg) => msg.message === data.message).length === 0) {
-            console.log("broadcast message: ", data);
-            setBroadcastMessages([...broadcastMessages, data.message]);
-            setMessages((prev) => [...prev, data]);
+          setMessages((prev) => [...prev, data]);
+          //check if data.message is not already in broadcastMessages
+          if (broadcastMessages.indexOf(data.message) == -1) {
+            console.log("message is not in broadcastMessages");
+            setBroadcastMessages((prev) => [...prev, data.message]);
+            // setMessages((prev) => [...prev, data]);
             sendMessage(data);
+          }else{
+            console.log("message already broadcasted");
+            // setMessages((prev) => [...prev, data]);
           }
         }
-
-        setMessages((prev) => [...prev, data]);
       });
 
-      setConnections((prev) => [...prev, conn]);
     });
   };
 
@@ -85,16 +90,17 @@ function App() {
 
   const sendMessage = (m) => {
     // console.log(m);
-    if(isBroadcast) {
-      setBroadcastMessages([...broadcastMessages, m.message]);
-    }
+    // if(isBroadcast) {
+    //   console.log("adding to broadcasting message");
+    //   setBroadcastMessages((prev) => [...prev, m.message]);
+    // }
     setLamportClock(lamportClock + 1);
 
     if (recepients.trim().length > 0) {
       const rec = recepients.split(",");
       rec.forEach((r) => connections[r - 1].send(m));
     } else {
-      console.log("broadcast message in send: ", m);
+      console.log("broadcast message in send: ", m, " to: ", connections);
       console.log("broadcastMessages: ", broadcastMessages);
       connections.forEach((c) => c.send(m));
     }
