@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Peer from "peerjs";
 
 const randId = () => {
@@ -19,10 +19,19 @@ function App() {
   const [recepients, setRecepients] = useState("");
   const [broadcastMessages, setBroadcastMessages] = useState([]);
   const [isBroadcast, setIsBroadcast] = useState(false);
-  const [lamportClock, setLamportClock] = useState(1);
   const [peer, setPeer] = useState(new Peer(randId()));
+
+  const [lamportClock, setLamportClock] = useState(1);
   const [connections, setConnections] = useState([]);
   const [messages, setMessages] = useState([]);
+
+  const receivedMessagesRef = useRef(messages)
+  const connectionsRef = useRef(connections)
+  const lamportClockRef = useRef(lamportClock)
+
+  connectionsRef.current = connections
+  receivedMessagesRef.current = messages
+  lamportClockRef.current = lamportClock
 
   useEffect(() => {
     peer.on("open", (id) => {
@@ -33,6 +42,32 @@ function App() {
       console.log("Connected to peer: " + conn.peer);
     });
   }, [peer]);
+
+  // useEffect(() => {
+  //   peer.on('connection', function (conn) {
+  //     conn.on('data', function (data) {
+  //       //console.log(chatLog)
+  //       //check in incoming connection is not already in list
+  //       if (connectionsRef.current.findIndex(x => x.peer === conn.peer) === -1) {
+  //         var connection = peer.connect(conn.peer)
+  //         setConnections(c => ([...c,connection]))
+  //       }
+  //       var currentLamport = lamportClockRef.current > data.lamportClock ? lamportClockRef.current + 1 : data.lamportClock + 1
+  //       setLamportClock((currentLamport));
+
+  //       //check if message is already received
+  //       if (receivedMessagesRef.current.findIndex(x => x === data.id) === -1) {
+  //         setMessages(c => ([...c, data.id]))
+  //         setMessage(c => ([...c, data.message]))
+
+  //         const broadcastedMessage = {id: data.id, lamportClock: currentLamport, originatorLamport: data.originatorLamport, message: data.message}
+
+  //         //broadcast message to all connections
+  //         connectionsRef.current.forEach(x => x.send(broadcastedMessage))
+  //       }
+  //     });
+  //   });
+  // }, []);
 
   const addPeer = () => {
     const conn = peer.connect(peerId);
@@ -54,20 +89,23 @@ function App() {
           setLamportClock(lamportClock + 1);
         }
 
-        setMessages((prev) => [...prev, data]);
 
         if (data.isBroadcasted) {
-          setMessages((prev) => [...prev, data]);
+          // setMessages((prev) => [...prev, data]);
           //check if data.message is not already in broadcastMessages
-          if (broadcastMessages.indexOf(data.message) == -1) {
-            console.log("message is not in broadcastMessages");
-            setBroadcastMessages((prev) => [...prev, data.message]);
-            // setMessages((prev) => [...prev, data]);
-            sendMessage(data);
+          if (receivedMessagesRef.current.findIndex(x => x.message === data.message) === -1) {
+            setMessages(c => ([...c, data]))
+  
+            const broadcastedMessage = {tempLamportClock: lamportClock, author: data.author, sentBy: peer.id, originatorLamport: data.originatorLamport, message: data.message, isBroadcasted: true}
+  
+            //broadcast message to all connections
+            connectionsRef.current.forEach(x => x.send(broadcastedMessage))
           }else{
-            console.log("message already broadcasted");
+            console.log("message already broadcasted and received from", data.sentBy);
             // setMessages((prev) => [...prev, data]);
           }
+        }else{
+          setMessages((prev) => [...prev, data]);
         }
       });
 
@@ -81,7 +119,8 @@ function App() {
       author: peer.id,
       sentBy: peer.id,
       tempLamportClock: lamportClock + 1,
-      isBroadcasted: isBroadcast
+      isBroadcasted: isBroadcast,
+      originatorLamport: "",
     };
     sendMessage(messageObj);
     setMessages((prev) => [...prev, messageObj]);
@@ -89,11 +128,6 @@ function App() {
   };
 
   const sendMessage = (m) => {
-    // console.log(m);
-    // if(isBroadcast) {
-    //   console.log("adding to broadcasting message");
-    //   setBroadcastMessages((prev) => [...prev, m.message]);
-    // }
     setLamportClock(lamportClock + 1);
 
     if (recepients.trim().length > 0) {
@@ -115,7 +149,8 @@ function App() {
   const connectPeer = (id) => {
     const conn = peer.connect(id);
     console.log("Connecting to: ", conn.peer);
-    configureConnection(conn);
+    setConnections(c => ([...c, conn]))
+    //configureConnection(conn);
   };
 
   const messageChangeHandler = (e) => {
