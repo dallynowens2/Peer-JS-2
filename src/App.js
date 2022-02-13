@@ -21,17 +21,29 @@ function App() {
   const [isBroadcast, setIsBroadcast] = useState(false);
   const [peer, setPeer] = useState(new Peer(randId()));
 
+  //sendSeq := 0; delivered := h0, 0, . . . , 0i; buffer := {}
+
+
   const [lamportClock, setLamportClock] = useState(1);
   const [connections, setConnections] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [sendSeq, setSendSeq] = useState(0);
+  const [delivered, setDelivered] = useState({});
+  const [buffer, setBuffer] = useState([]);
 
   const receivedMessagesRef = useRef(messages)
   const connectionsRef = useRef(connections)
   const lamportClockRef = useRef(lamportClock)
+  const sendSeqRef = useRef(sendSeq)
+  const deliveredRef = useRef(delivered)
+  const bufferRef = useRef(buffer)
 
   connectionsRef.current = connections
   receivedMessagesRef.current = messages
   lamportClockRef.current = lamportClock
+  sendSeqRef.current = sendSeq
+  deliveredRef.current = delivered
+  bufferRef.current = buffer
 
   useEffect(() => {
     peer.on("open", (id) => {
@@ -43,31 +55,6 @@ function App() {
     });
   }, [peer]);
 
-  // useEffect(() => {
-  //   peer.on('connection', function (conn) {
-  //     conn.on('data', function (data) {
-  //       //console.log(chatLog)
-  //       //check in incoming connection is not already in list
-  //       if (connectionsRef.current.findIndex(x => x.peer === conn.peer) === -1) {
-  //         var connection = peer.connect(conn.peer)
-  //         setConnections(c => ([...c,connection]))
-  //       }
-  //       var currentLamport = lamportClockRef.current > data.lamportClock ? lamportClockRef.current + 1 : data.lamportClock + 1
-  //       setLamportClock((currentLamport));
-
-  //       //check if message is already received
-  //       if (receivedMessagesRef.current.findIndex(x => x === data.id) === -1) {
-  //         setMessages(c => ([...c, data.id]))
-  //         setMessage(c => ([...c, data.message]))
-
-  //         const broadcastedMessage = {id: data.id, lamportClock: currentLamport, originatorLamport: data.originatorLamport, message: data.message}
-
-  //         //broadcast message to all connections
-  //         connectionsRef.current.forEach(x => x.send(broadcastedMessage))
-  //       }
-  //     });
-  //   });
-  // }, []);
 
   const addPeer = () => {
     const conn = peer.connect(peerId);
@@ -80,9 +67,11 @@ function App() {
   const configureConnection = (conn) => {
     conn.on("open", () => {
       setConnections((prev) => [...prev, conn]);
-
+      setDelivered({ ...delivered, [conn.peer]: 0 });
+      
       conn.on("data", (data) => {
         console.log(data);
+
         if (data.tempLamportClock > lamportClock) {
           setLamportClock(data.tempLamportClock + 1);
         } else {
@@ -91,12 +80,31 @@ function App() {
 
 
         if (data.isBroadcasted) {
-          // setMessages((prev) => [...prev, data]);
           //check if data.message is not already in broadcastMessages
           if (receivedMessagesRef.current.findIndex(x => x.message === data.message) === -1) {
+
+            // buffer := buffer ∪ {msg}
+            // while ∃(sender , deps, m) ∈ buffer . deps ≤ delivered do
+            // deliver m to the application
+            // buffer := buffer \ {(sender , deps, m)}
+            // delivered[sender ] := delivered[sender ] + 1
+            // end while
+
+            setBuffer(prev => ([...prev, data]))
+            console.log("buffer" , bufferRef.current, "delivered" , deliveredRef.current)
+
+            while (bufferRef.current.findIndex(x => x.deps[data.sender] <= deliveredRef.current[data.sender]) !== -1) {
+              console.log("inside the while loop")
+              const message = bufferRef.current.find(x => x.originatorLamport <= deliveredRef.current[data.sender])
+              setBroadcastMessages(prev => ([...prev, message]))
+
+              setDelivered(prev => ({...prev, [message.sender]: deliveredRef.current[message.sender] + 1}))
+              setBuffer(prev => prev.filter(x => x.originatorLamport > deliveredRef.current[message.sender]))
+            }
+
             setMessages(c => ([...c, data]))
   
-            const broadcastedMessage = {tempLamportClock: lamportClock, author: data.author, sentBy: peer.id, originatorLamport: data.originatorLamport, message: data.message, isBroadcasted: true}
+            const broadcastedMessage = {tempLamportClock: lamportClock, author: data.author, sentBy: peer.id, originatorLamport: data.originatorLamport, message: data.message, isBroadcasted: true, deps: deliveredRef.current}
   
             //broadcast message to all connections
             connectionsRef.current.forEach(x => x.send(broadcastedMessage))
@@ -112,7 +120,9 @@ function App() {
     });
   };
 
+
   const sendMessageHandler = () => {
+    // deps := delivered; deps[i] := sendSeq
     const messageObj = {
       message,
       timeSent: new Date(),
@@ -121,6 +131,7 @@ function App() {
       tempLamportClock: lamportClock + 1,
       isBroadcasted: isBroadcast,
       originatorLamport: "",
+      deps: []
     };
     sendMessage(messageObj);
     setMessages((prev) => [...prev, messageObj]);
@@ -134,9 +145,16 @@ function App() {
       const rec = recepients.split(",");
       rec.forEach((r) => connections[r - 1].send(m));
     } else {
-      console.log("broadcast message in send: ", m, " to: ", connections);
-      console.log("broadcastMessages: ", broadcastMessages);
-      connections.forEach((c) => c.send(m));
+      var deps = deliveredRef.current;
+      deps[peer.id] = sendSeqRef.current;
+      setSendSeq(sendSeqRef.current + 1);
+      setDelivered({ ...delivered, [peer.id]: sendSeqRef.current });
+      
+      //update m
+      m.deps = deps;
+
+      console.log("broadcast message in send: ", m, " to: ", connections, "broadcastMessages: ", broadcastMessages);
+      connectionsRef.current.forEach(x => x.send(m));
     }
   };
 
